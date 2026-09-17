@@ -1,0 +1,9 @@
+{
+  "name": "Treasures by Mudaso",
+  "short_name": "Treasures",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#fbf7ef",
+  "theme_color": "#063b2c",
+  "description": "Thoughtful groceries and curated packages."
+}
