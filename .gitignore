@@ -1,0 +1,5 @@
+# Generated deployment bundles are kept locally for manual Cloudflare uploads.
+treasures-by-mudaso-hosting*.zip
+
+# Local Codex workspace instructions are environment-specific.
+AGENTS.md
