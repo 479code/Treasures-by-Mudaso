@@ -1,0 +1,44 @@
+name: Deploy Google Apps Script
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'google-apps-script.gs'
+      - '.github/workflows/deploy-apps-script.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Update the live Sheets bridge
+    if: ${{ secrets.CLASPRC_JSON != '' && secrets.APPS_SCRIPT_ID != '' && secrets.APPS_SCRIPT_DEPLOYMENT_ID != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the release
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install clasp
+        run: npm install --global @google/clasp
+      - name: Set up the private Apps Script connection
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+        run: |
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          mkdir -p .apps-script-deploy
+          cp google-apps-script.gs .apps-script-deploy/Code.gs
+          printf '{"scriptId":"%s","rootDir":".apps-script-deploy"}' "$APPS_SCRIPT_ID" > .clasp.json
+      - name: Push and publish the current web-app deployment
+        env:
+          DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          clasp push --force
+          VERSION=$(clasp version "Git ${RELEASE}" | grep -oE '[0-9]+' | tail -1)
+          clasp redeploy "$DEPLOYMENT_ID" "$VERSION" "Git ${RELEASE}"

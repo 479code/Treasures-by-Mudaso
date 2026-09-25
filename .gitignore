@@ -3,3 +3,8 @@ treasures-by-mudaso-hosting*.zip
 
 # Local Codex workspace instructions are environment-specific.
 AGENTS.md
+
+# Apps Script deployment credentials are supplied only through GitHub Secrets.
+.clasp.json
+.clasprc.json
+.apps-script-deploy/
