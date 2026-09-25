@@ -14,29 +14,40 @@ permissions:
 jobs:
   deploy:
     name: Update the live Sheets bridge
-    if: ${{ secrets.CLASPRC_JSON != '' && secrets.APPS_SCRIPT_ID != '' && secrets.APPS_SCRIPT_DEPLOYMENT_ID != '' }}
     runs-on: ubuntu-latest
+    env:
+      CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+      APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+      DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
     steps:
+      - name: Explain missing setup
+        if: ${{ env.CLASPRC_JSON == '' || env.APPS_SCRIPT_ID == '' || env.DEPLOYMENT_ID == '' }}
+        run: echo "Apps Script deployment skipped until its three GitHub secrets are added."
       - name: Check out the release
+        if: ${{ env.CLASPRC_JSON != '' && env.APPS_SCRIPT_ID != '' && env.DEPLOYMENT_ID != '' }}
         uses: actions/checkout@v4
       - name: Set up Node
+        if: ${{ env.CLASPRC_JSON != '' && env.APPS_SCRIPT_ID != '' && env.DEPLOYMENT_ID != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: '20'
       - name: Install clasp
+        if: ${{ env.CLASPRC_JSON != '' && env.APPS_SCRIPT_ID != '' && env.DEPLOYMENT_ID != '' }}
         run: npm install --global @google/clasp
       - name: Set up the private Apps Script connection
+        if: ${{ env.CLASPRC_JSON != '' && env.APPS_SCRIPT_ID != '' && env.DEPLOYMENT_ID != '' }}
         env:
-          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
-          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+          CLASPRC_JSON: ${{ env.CLASPRC_JSON }}
+          APPS_SCRIPT_ID: ${{ env.APPS_SCRIPT_ID }}
         run: |
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           mkdir -p .apps-script-deploy
           cp google-apps-script.gs .apps-script-deploy/Code.gs
           printf '{"scriptId":"%s","rootDir":".apps-script-deploy"}' "$APPS_SCRIPT_ID" > .clasp.json
       - name: Push and publish the current web-app deployment
+        if: ${{ env.CLASPRC_JSON != '' && env.APPS_SCRIPT_ID != '' && env.DEPLOYMENT_ID != '' }}
         env:
-          DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
+          DEPLOYMENT_ID: ${{ env.DEPLOYMENT_ID }}
           RELEASE: ${{ github.sha }}
         run: |
           clasp push --force
