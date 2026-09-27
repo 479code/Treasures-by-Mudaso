@@ -1,55 +1,90 @@
-name: Deploy Google Apps Script
+# Pushes google-apps-script.gs to the Treasures Apps Script project and updates the
+# live web app in place, so the /exec link in config.js never changes.
+#
+# Secrets (Settings > Secrets and variables > Actions):
+#   CLASPRC_JSON               required  contents of %USERPROFILE%\.clasprc.json after `clasp login`
+#   APPS_SCRIPT_ID             optional  defaults to the Treasures script below
+#   APPS_SCRIPT_DEPLOYMENT_ID  optional  defaults to the ID inside the /exec link in config.js
+name: Deploy Apps Script
 
 on:
   push:
-    branches: [master]
+    branches: [master, main]
     paths:
-      - 'google-apps-script.gs'
-      - '.github/workflows/deploy-apps-script.yml'
+      - google-apps-script.gs
+      - config.js
+      - apps-script/**
+      - .github/workflows/deploy-apps-script.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: apps-script-deploy
+  cancel-in-progress: false
+
+env:
+  DEFAULT_SCRIPT_ID: 1AuTQ8z3zfwp5jExwl2s2LKkql10cGW1tlGUt9XLCZwELDy8d09ywsFT7
+
 jobs:
   deploy:
     name: Update the live Sheets bridge
     runs-on: ubuntu-latest
-    env:
-      CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
-      APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
-      DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
     steps:
-      - name: Explain missing setup
-        if: ${{ env.CLASPRC_JSON == '' || env.APPS_SCRIPT_ID == '' || env.DEPLOYMENT_ID == '' }}
-        run: echo "Apps Script deployment skipped until its three GitHub secrets are added."
-      - name: Check out the release
-        if: ${{ env.CLASPRC_JSON != '' && env.APPS_SCRIPT_ID != '' && env.DEPLOYMENT_ID != '' }}
-        uses: actions/checkout@v4
-      - name: Set up Node
-        if: ${{ env.CLASPRC_JSON != '' && env.APPS_SCRIPT_ID != '' && env.DEPLOYMENT_ID != '' }}
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
       - name: Install clasp
-        if: ${{ env.CLASPRC_JSON != '' && env.APPS_SCRIPT_ID != '' && env.DEPLOYMENT_ID != '' }}
-        run: npm install --global @google/clasp
-      - name: Set up the private Apps Script connection
-        if: ${{ env.CLASPRC_JSON != '' && env.APPS_SCRIPT_ID != '' && env.DEPLOYMENT_ID != '' }}
+        run: npm install --global @google/clasp@3.4.1
+
+      - name: Load Google credentials
         env:
-          CLASPRC_JSON: ${{ env.CLASPRC_JSON }}
-          APPS_SCRIPT_ID: ${{ env.APPS_SCRIPT_ID }}
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
-          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
-          mkdir -p .apps-script-deploy
-          cp google-apps-script.gs .apps-script-deploy/Code.gs
-          printf '{"scriptId":"%s","rootDir":".apps-script-deploy"}' "$APPS_SCRIPT_ID" > .clasp.json
-      - name: Push and publish the current web-app deployment
-        if: ${{ env.CLASPRC_JSON != '' && env.APPS_SCRIPT_ID != '' && env.DEPLOYMENT_ID != '' }}
+          if [ -z "$CLASPRC_JSON" ]; then
+            echo "::error::Missing secret CLASPRC_JSON. Add it in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          chmod 600 "$HOME/.clasprc.json"
+          node -e "JSON.parse(require('fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'))" \
+            || { echo "::error::CLASPRC_JSON is not valid JSON. Copy it again with: Get-Content \"\$HOME\\.clasprc.json\" -Raw | Set-Clipboard"; exit 1; }
+
+      - name: Prepare the Apps Script project
         env:
-          DEPLOYMENT_ID: ${{ env.DEPLOYMENT_ID }}
-          RELEASE: ${{ github.sha }}
+          APPS_SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
         run: |
+          SCRIPT_ID="${APPS_SCRIPT_ID:-$DEFAULT_SCRIPT_ID}"
+          cp google-apps-script.gs apps-script/Code.gs
+          printf '{"scriptId":"%s","rootDir":"."}' "$SCRIPT_ID" > apps-script/.clasp.json
+          printf '**/**\n!Code.gs\n!appsscript.json\n' > apps-script/.claspignore
+
+      - name: Push the script
+        working-directory: apps-script
+        run: |
+          clasp show-file-status
           clasp push --force
-          VERSION=$(clasp version "Git ${RELEASE}" | grep -oE '[0-9]+' | tail -1)
-          clasp redeploy "$DEPLOYMENT_ID" "$VERSION" "Git ${RELEASE}"
+
+      - name: Update the live web app (same /exec link)
+        working-directory: apps-script
+        env:
+          DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
+        run: |
+          ID="$DEPLOYMENT_ID"
+          if [ -z "$ID" ]; then
+            ID=$(grep -oE 'script\.google\.com/macros/s/[A-Za-z0-9_-]+/exec' ../config.js | head -1 | sed -E 's#.*/s/([^/]+)/exec#\1#')
+          fi
+          if [ -z "$ID" ]; then
+            echo "::warning::Code pushed, but no web-app deployment ID yet. Put the /exec link in config.js and push again."
+            exit 0
+          fi
+          clasp update-deployment "$ID" --description "GitHub ${GITHUB_SHA::7}"
+          echo "Live web app updated: https://script.google.com/macros/s/$ID/exec"
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f "$HOME/.clasprc.json" apps-script/.clasp.json
