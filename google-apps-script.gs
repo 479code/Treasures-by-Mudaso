@@ -37,6 +37,8 @@ function onOpen() {
     .addItem('Set up sheets', 'setup')
     .addItem('Show owner key', 'showOwnerKey')
     .addItem('Create a new owner key', 'rotateOwnerKey')
+    .addSeparator()
+    .addItem('Authorise photo uploads', 'authorizeProductImages')
     .addToUi();
 }
 
@@ -55,6 +57,15 @@ function setup() {
   if (starter && starter.getLastRow() === 0 && book.getSheets().length > 1) book.deleteSheet(starter);
   productImageFolder();
   return notify(`Treasures is set up.\n\nYour private owner key:\n${ownerKey()}\n\nNext: Deploy > New deployment > Web app (Execute as: Me, Access: Anyone), then copy the /exec URL into config.js.`);
+}
+
+// Run once (Treasures > Authorise photo uploads) so product photos can be saved to Drive.
+function authorizeProductImages() {
+  const folder = productImageFolder();
+  const check = folder.createFile('Treasures photo upload check.txt', 'Temporary file confirming photo uploads work.');
+  check.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  check.setTrashed(true);
+  return notify('Photo uploads are authorised. Product photos will be saved in the Drive folder "Treasures by Mudaso Product Images".');
 }
 
 function showOwnerKey() { return notify(`Your private owner key:\n${ownerKey()}\n\nPaste it in the app: Owner > More > Private owner key.`); }
