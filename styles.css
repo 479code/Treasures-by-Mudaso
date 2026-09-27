@@ -237,3 +237,5 @@ h2 { font-size: 27px; margin-bottom: 14px; }
 .conn-field { display:grid; gap:6px; margin:0; }
 .conn-field small { color:var(--muted); font-size:11px; }
 .conn-field code { display:block; padding:10px 12px; overflow:hidden; border-radius:12px; background:var(--cream); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+/* Longer hero headline */
+.hero h1.hero-long { max-width: min(60%, 260px); font-size: clamp(25px, 6.8vw, 40px); line-height: 1.04; letter-spacing: -.025em; }
