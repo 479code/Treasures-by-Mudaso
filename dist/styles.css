@@ -219,3 +219,4 @@ h2 { font-size: 27px; margin-bottom: 14px; }
 .bi-overview i { font-size:28px; font-style:normal; color:var(--gold-soft); }
 @media (max-width: 380px) { .bi-hero-split strong, .bi-mini-grid strong { font-size:13px; } }
 .bi-reset { margin-bottom:10px; color:var(--danger); border-color:#e7b3a9; }
+.new-category-field[hidden] { display:none; }

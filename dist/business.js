@@ -443,3 +443,53 @@ window.addEventListener('submit', async event => {
     showToast(`Photo upload failed: ${error.message || 'please try again'}`);
   }
 }, true);
+
+/* ---------- Custom product categories ---------- */
+
+const defaultCategories = ['Pantry', 'Rice & grains', 'Fresh essentials', 'Home & décor', 'Fragrances', 'Bags & accessories', 'Gift items'];
+const NEW_CATEGORY = '__new__';
+
+function allCategories() {
+  const seen = new Map();
+  [...defaultCategories, ...products.map(p => p.category)].forEach(name => {
+    const label = String(name || '').trim();
+    if (label && !seen.has(label.toLowerCase())) seen.set(label.toLowerCase(), label);
+  });
+  return [...seen.values()];
+}
+
+const addProductWithCategories = addProductV2;
+addProductV2 = function (index) {
+  const item = Number.isInteger(index) ? products[index] : null;
+  const options = allCategories().map(name => `<option ${item?.category === name ? 'selected' : ''}>${esc(name)}</option>`).join('');
+  return addProductWithCategories(index).replace(
+    /<select required name="category">[\s\S]*?<\/select><\/label>/,
+    `<select required name="category" data-category-select><option value="">Choose a category</option>${options}<option value="${NEW_CATEGORY}">＋ Add new category…</option></select></label><label class="new-category-field" hidden>New category name<input name="newCategory" maxlength="40" placeholder="e.g. Kitchen utensils" autocomplete="off"/></label>`
+  );
+};
+
+document.addEventListener('change', event => {
+  const select = event.target.closest('[data-category-select]');
+  if (!select) return;
+  const field = select.form.querySelector('.new-category-field');
+  const input = field.querySelector('input');
+  const adding = select.value === NEW_CATEGORY;
+  field.hidden = !adding;
+  input.required = adding;
+  if (adding) input.focus();
+});
+
+// Runs before the product save: turns "Add new category" into the typed name.
+window.addEventListener('submit', event => {
+  const form = event.target;
+  if (form.id !== 'product-form') return;
+  const select = form.querySelector('[data-category-select]');
+  if (!select || select.value !== NEW_CATEGORY) return;
+  const typed = clean(form.querySelector('input[name="newCategory"]').value).replace(/\s+/g, ' ').slice(0, 40);
+  if (!typed) { event.preventDefault(); event.stopImmediatePropagation(); showToast('Type a name for the new category.'); return; }
+  const existing = allCategories().find(name => name.toLowerCase() === typed.toLowerCase());
+  const name = existing || typed.charAt(0).toUpperCase() + typed.slice(1);
+  select.add(new Option(name, name, true, true));
+  select.value = name;
+  if (!existing) showToast(`New category "${name}" added.`);
+}, true);
