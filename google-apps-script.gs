@@ -37,8 +37,6 @@ function onOpen() {
     .addItem('Set up sheets', 'setup')
     .addItem('Show owner key', 'showOwnerKey')
     .addItem('Create a new owner key', 'rotateOwnerKey')
-    .addSeparator()
-    .addItem('Authorise photo uploads', 'authorizeProductImages')
     .addToUi();
 }
 
@@ -55,17 +53,7 @@ function setup() {
   });
   const starter = book.getSheetByName('Sheet1');
   if (starter && starter.getLastRow() === 0 && book.getSheets().length > 1) book.deleteSheet(starter);
-  productImageFolder();
   return notify(`Treasures is set up.\n\nYour private owner key:\n${ownerKey()}\n\nNext: Deploy > New deployment > Web app (Execute as: Me, Access: Anyone), then copy the /exec URL into config.js.`);
-}
-
-// Run once (Treasures > Authorise photo uploads) so product photos can be saved to Drive.
-function authorizeProductImages() {
-  const folder = productImageFolder();
-  const check = folder.createFile('Treasures photo upload check.txt', 'Temporary file confirming photo uploads work.');
-  check.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  check.setTrashed(true);
-  return notify('Photo uploads are authorised. Product photos will be saved in the Drive folder "Treasures by Mudaso Product Images".');
 }
 
 function showOwnerKey() { return notify(`Your private owner key:\n${ownerKey()}\n\nPaste it in the app: Owner > More > Private owner key.`); }
@@ -121,19 +109,7 @@ function doPost(event) {
     });
     return json({ ok: true });
   }
-  if (payload.action === 'uploadImage') {
-    if (!payload.imageId || !payload.base64 || !payload.mimeType) return json({ ok: false, error: 'Invalid image.' });
-    const imageSheet = ensureSheet(book, 'Images');
-    try {
-      const blob = Utilities.newBlob(Utilities.base64Decode(payload.base64), payload.mimeType, payload.name || 'product-image');
-      const file = productImageFolder().createFile(blob);
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      return upsertRecord(imageSheet, { 'Image ID': payload.imageId, 'Image URL': `https://drive.google.com/uc?export=view&id=${file.getId()}`, 'File ID': file.getId(), 'Name': payload.name || file.getName(), 'Uploaded at': new Date().toISOString(), 'Upload status': 'ready' });
-    } catch (error) {
-      upsertRecord(imageSheet, { 'Image ID': payload.imageId, 'Name': payload.name || 'product-image', 'Uploaded at': new Date().toISOString(), 'Upload status': String(error.message || error) });
-      return json({ ok: false, error: String(error.message || error) });
-    }
-  }
+  if (payload.action === 'uploadImage') return json({ ok: false, error: 'Photos now upload to Cloudinary. Refresh the app.' });
   if (payload.action !== 'upsert') return json({ ok: false, error: 'Unknown action.' });
   const sheet = ensureSheet(book, payload.sheet);
   if (!sheet || !payload.record) return json({ ok: false, error: 'Invalid sheet or record.' });
@@ -355,15 +331,6 @@ function styleHeader(sheet) {
   sheet.setFrozenRows(1);
   sheet.getRange(1, 1, 1, width).setFontWeight('bold').setFontColor('#ffffff').setBackground('#805d37');
   sheet.autoResizeColumns(1, width);
-}
-
-function productImageFolder() {
-  const existingId = PROPS.getProperty('PRODUCT_IMAGES_FOLDER_ID');
-  if (existingId) { try { return DriveApp.getFolderById(existingId); } catch (e) {} }
-  const folders = DriveApp.getFoldersByName('Treasures by Mudaso Product Images');
-  const folder = folders.hasNext() ? folders.next() : DriveApp.createFolder('Treasures by Mudaso Product Images');
-  PROPS.setProperty('PRODUCT_IMAGES_FOLDER_ID', folder.getId());
-  return folder;
 }
 
 function notify(message) {

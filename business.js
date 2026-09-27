@@ -385,3 +385,61 @@ document.addEventListener('click', event => {
   Object.keys(localStorage).filter(key => key.startsWith('treasures-') && !keep.includes(key)).forEach(key => localStorage.removeItem(key));
   location.reload();
 }, true);
+
+/* ---------- Product & package photos → Cloudinary ---------- */
+
+const cloudinaryConfig = (window.TREASURES_CONFIG || {}).cloudinary || {};
+const cloudinaryReady = Boolean(cloudinaryConfig.cloudName && cloudinaryConfig.uploadPreset);
+
+function deliveryUrl(url) {
+  // Serve a resized, auto-format (WebP/AVIF) copy to customers.
+  return String(url || '').replace('/image/upload/', '/image/upload/f_auto,q_auto,c_limit,w_1200/');
+}
+
+async function photoBlob(file) {
+  const photo = await optimisePhoto(file);
+  const bytes = Uint8Array.from(atob(photo.base64), c => c.charCodeAt(0));
+  return new Blob([bytes], { type: photo.mimeType || 'image/jpeg' });
+}
+
+async function uploadToCloudinary(file, subfolder) {
+  if (!cloudinaryReady) throw new Error('Photo storage is not set up in config.js.');
+  if (!String(file.type || '').startsWith('image/')) throw new Error('Please choose an image file.');
+  const body = new FormData();
+  body.append('file', await photoBlob(file), (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg');
+  body.append('upload_preset', cloudinaryConfig.uploadPreset);
+  body.append('folder', `${cloudinaryConfig.folder || 'treasures'}/${subfolder}`);
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudinaryConfig.cloudName)}/image/upload`, { method: 'POST', body });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.secure_url) {
+    const reason = data?.error?.message || `upload failed (${response.status})`;
+    throw new Error(/preset/i.test(reason) ? `Cloudinary upload preset "${cloudinaryConfig.uploadPreset}" is missing or not unsigned.` : reason);
+  }
+  return deliveryUrl(data.secure_url);
+}
+
+// Products: the existing save flow calls uploadProductImage(file).
+uploadProductImage = file => uploadToCloudinary(file, 'products');
+
+// Packages: upload the chosen photo first, then let the normal save run with the new link.
+window.addEventListener('submit', async event => {
+  const form = event.target;
+  if (form.id !== 'package-form') return;
+  const input = form.querySelector('input[name="photoUpload"]');
+  const file = input?.files?.[0];
+  if (!file || form.dataset.photoUploaded === 'true') return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  const button = form.querySelector('[type="submit"]');
+  if (button) button.disabled = true;
+  showToast('Uploading package photo…');
+  try {
+    form.dataset.existingImage = await uploadToCloudinary(file, 'packages');
+    form.dataset.photoUploaded = 'true';
+    input.replaceWith(Object.assign(input.cloneNode(), { value: '' })); // fresh, empty file field
+    if (button) button.disabled = false;
+    form.requestSubmit();
+  } catch (error) {
+    if (button) button.disabled = false;
+    showToast(`Photo upload failed: ${error.message || 'please try again'}`);
+  }
+}, true);
