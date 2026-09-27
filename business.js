@@ -493,3 +493,84 @@ window.addEventListener('submit', event => {
   select.value = name;
   if (!existing) showToast(`New category "${name}" added.`);
 }, true);
+
+/* ---------- Protected Google Sheets connection panel ---------- */
+// The link, owner key and "Clear data" stay hidden until the owner re-enters the PIN.
+
+let connectionUnlocked = false;
+let connectionRelockTimer = null;
+const configEndpoint = String((window.TREASURES_CONFIG || {}).endpoint || '').trim();
+
+function lockConnection() {
+  connectionUnlocked = false;
+  clearTimeout(connectionRelockTimer);
+}
+
+function connectionPanel() {
+  const connected = Boolean(sheetsEndpoint);
+  const keySaved = Boolean(sheetOwnerKey);
+  const status = connected && keySaved
+    ? '<div class="conn-status ok"><b>✓ Connected to your Google Sheet</b><span>Products, orders and settings sync automatically.</span></div>'
+    : `<div class="conn-status warn"><b>${connected ? 'Owner key needed' : 'Not connected'}</b><span>${connected ? 'Unlock the settings below and paste your owner key (Sheet: Treasures › Show owner key).' : 'Unlock the settings below to connect.'}</span></div>`;
+  const actions = `<div class="conn-actions">${operationsSheetUrl ? `<a class="button secondary" href="${esc(operationsSheetUrl)}" target="_blank" rel="noreferrer">Open your sheet</a>` : ''}${connected ? '<button class="button secondary" data-sync-sheet>Load latest from Sheet</button>' : ''}</div>`;
+  if (!connectionUnlocked) {
+    return `<div class="sheet-connection conn-locked">${status}${actions}<form id="connection-pin-form" class="conn-unlock"><span>🔒 Connection settings are locked</span><div><input name="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="Enter PIN to change" aria-label="Owner PIN"/><button class="button secondary" type="submit">Unlock</button></div></form></div>`;
+  }
+  const link = configEndpoint
+    ? `<div class="conn-field"><small>Web-app link (set in config.js — change it in the website code)</small><code>${esc(configEndpoint.replace(/(\/s\/.{10}).+(.{6}\/exec)$/, '$1…$2'))}</code></div>`
+    : `<form id="sheet-connection-form" class="conn-field"><small>Web-app link (ends in /exec)</small><div><input name="endpoint" type="url" value="${esc(sheetsEndpoint)}" placeholder="https://script.google.com/macros/s/.../exec"/><button class="button" type="submit">Save link</button></div></form>`;
+  const key = `<form id="owner-sheet-key-form" class="conn-field"><small>Owner key ${keySaved ? '(saved on this device — paste a new one only to replace it)' : '(Sheet: Treasures › Show owner key)'}</small><div><input name="ownerKey" type="password" value="" placeholder="${keySaved ? '•••••••• saved' : 'Paste owner key'}" autocomplete="off"/><button class="button" type="submit">${keySaved ? 'Replace key' : 'Save key'}</button></div></form>`;
+  return `<div class="sheet-connection conn-open">${status}${actions}<div class="conn-settings"><div class="conn-settings-head"><b>🔓 Connection settings</b><button class="link" data-lock-connection>Lock</button></div>${link}${key}<button class="owner-lock bi-reset" data-reset-device>Clear data on this device</button><p class="bi-note">Locks again automatically after 3 minutes.</p></div></div>`;
+}
+
+const ownerMoreProtectedBase = ownerMoreV2;
+ownerMoreV2 = function () {
+  return ownerMoreProtectedBase().replace(/<div class="sheet-connection">[\s\S]*?(?=<button class="owner-lock" data-owner-lock>)/, connectionPanel());
+};
+
+// PIN check (same PIN as the owner workspace).
+window.addEventListener('submit', async event => {
+  if (event.target.id !== 'connection-pin-form') return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  const pin = String(event.target.elements.pin.value || '').trim();
+  const stored = localStorage.getItem(ownerPinKey);
+  const ok = stored && (stored === await hashPin(pin) || stored === pin);
+  if (!ok) { showToast('That PIN is not correct.'); event.target.elements.pin.value = ''; return; }
+  connectionUnlocked = true;
+  clearTimeout(connectionRelockTimer);
+  connectionRelockTimer = setTimeout(() => { lockConnection(); if (document.querySelector('.conn-open')) render('owner-more'); }, 3 * 60 * 1000);
+  render('owner-more');
+}, true);
+
+// Never save an empty owner key by accident; re-lock after a change.
+window.addEventListener('submit', event => {
+  if (event.target.id !== 'owner-sheet-key-form') return;
+  const value = String(event.target.elements.ownerKey.value || '').trim();
+  if (!connectionUnlocked) { event.preventDefault(); event.stopImmediatePropagation(); showToast('Unlock connection settings first.'); return; }
+  if (!value) { event.preventDefault(); event.stopImmediatePropagation(); showToast('Paste the owner key first. The saved key was not changed.'); return; }
+  if (!/^tbm-[a-z0-9]{8,}$/i.test(value) && !window.confirm('This does not look like a Treasures owner key (they start with "tbm-"). Save it anyway?')) { event.preventDefault(); event.stopImmediatePropagation(); return; }
+  event.preventDefault(); event.stopImmediatePropagation();
+  sheetOwnerKey = value;
+  localStorage.setItem(sheetOwnerKeyStorageKey, sheetOwnerKey);
+  showToast('Owner key saved on this device.');
+  lockConnection();
+  render('owner-more');
+  if (sheetsEndpoint) loadFromSheetSecure();
+}, true);
+
+// Link and "Clear data" only work while unlocked.
+window.addEventListener('submit', event => {
+  if (event.target.id === 'sheet-connection-form' && !connectionUnlocked) { event.preventDefault(); event.stopImmediatePropagation(); showToast('Unlock connection settings first.'); }
+}, true);
+window.addEventListener('click', event => {
+  if (event.target.closest('[data-lock-connection]')) { event.preventDefault(); event.stopImmediatePropagation(); lockConnection(); render('owner-more'); return; }
+  if (event.target.closest('[data-reset-device]') && !connectionUnlocked) { event.preventDefault(); event.stopImmediatePropagation(); showToast('Unlock connection settings first.'); }
+}, true);
+
+// Leaving the More page, or locking the workspace, locks the settings again.
+const renderWithConnectionLock = render;
+render = function (page) {
+  const target = page || (location.hash === '#owner' ? 'owner-overview' : 'home');
+  if (connectionUnlocked && target !== 'owner-more') lockConnection();
+  return renderWithConnectionLock(page);
+};

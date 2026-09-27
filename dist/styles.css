@@ -220,3 +220,20 @@ h2 { font-size: 27px; margin-bottom: 14px; }
 @media (max-width: 380px) { .bi-hero-split strong, .bi-mini-grid strong { font-size:13px; } }
 .bi-reset { margin-bottom:10px; color:var(--danger); border-color:#e7b3a9; }
 .new-category-field[hidden] { display:none; }
+/* Protected connection panel */
+.conn-status { display:grid; gap:3px; padding:12px 14px; border-radius:14px; }
+.conn-status.ok { background:#eef4e8; color:#3f6a2c; }
+.conn-status.warn { background:#fbeee9; color:var(--danger); }
+.conn-status span { font-size:12px; opacity:.9; }
+.conn-actions { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.conn-actions .button { flex:1 1 150px; text-align:center; text-decoration:none; padding:10px 12px; font-size:13px; }
+.conn-unlock { display:grid; gap:8px; padding-top:12px; border-top:1px solid var(--line); }
+.conn-unlock span { color:var(--muted); font-size:12px; font-weight:600; }
+.conn-unlock div, .conn-field div { display:flex; gap:8px; }
+.conn-unlock input, .conn-field input { flex:1; min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--paper); color:var(--ink); }
+.conn-unlock .button, .conn-field .button { flex:none; padding:10px 14px; font-size:13px; }
+.conn-settings { display:grid; gap:12px; padding-top:12px; border-top:1px solid var(--line); }
+.conn-settings-head { display:flex; justify-content:space-between; align-items:center; }
+.conn-field { display:grid; gap:6px; margin:0; }
+.conn-field small { color:var(--muted); font-size:11px; }
+.conn-field code { display:block; padding:10px 12px; overflow:hidden; border-radius:12px; background:var(--cream); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
