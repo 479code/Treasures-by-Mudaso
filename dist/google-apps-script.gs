@@ -37,6 +37,8 @@ function onOpen() {
     .addItem('Set up sheets', 'setup')
     .addItem('Show owner key', 'showOwnerKey')
     .addItem('Create a new owner key', 'rotateOwnerKey')
+    .addSeparator()
+    .addItem('Sync price list to app', 'syncPriceList')
     .addToUi();
 }
 
@@ -61,6 +63,122 @@ function showOwnerKey() { return notify(`Your private owner key:\n${ownerKey()}\
 function rotateOwnerKey() {
   PROPS.deleteProperty('OWNER_API_KEY');
   return notify(`New owner key:\n${ownerKey()}\n\nThe old key stops working now. Update it on every owner device.`);
+}
+
+/* ---------- Price list → Products sync ----------
+ * Reads the price-list tab (any tab whose name contains "price list" with a "Product" header)
+ * and keeps the Products tab (what the app reads) in step with it.
+ * - New items are added with a stable ID from their S/N (PL-001, PL-002 …) and a first-guess category.
+ * - Name, selling price and cost price follow the price list whenever those cells are filled.
+ * - Category, photo, sale settings and availability are managed in the app and never overwritten.
+ * - Quantity only sets the starting stock (or restocks an item at 0), so customer sales are not undone.
+ * Runs from Treasures > Sync price list to app, and automatically when a price-list row is edited.
+ */
+function priceListSheet(book) {
+  return book.getSheets().find(sheet => /price\s*list/i.test(sheet.getName())) || null;
+}
+
+function priceListColumns(values) {
+  for (let r = 0; r < Math.min(values.length, 10); r++) {
+    const row = values[r].map(cell => String(cell).trim().toLowerCase());
+    const product = row.findIndex(cell => cell === 'product' || cell === 'product name' || cell === 'item');
+    if (product === -1) continue;
+    const find = test => row.findIndex(test);
+    return {
+      headerRow: r,
+      serial: find(cell => /^s\/?n$|^no\.?$|^#$/.test(cell)),
+      product,
+      cost: find(cell => cell.startsWith('cost')),
+      quantity: find(cell => cell.startsWith('qty') || cell.startsWith('quantity') || cell === 'stock'),
+      price: find(cell => cell.includes('selling') || cell === 'price' || cell.startsWith('price'))
+    };
+  }
+  return null;
+}
+
+function toNaira(value) {
+  if (typeof value === 'number') return value;
+  const digits = String(value || '').replace(/[^0-9.]/g, '');
+  return digits ? Number(digits) : 0;
+}
+
+const CATEGORY_RULES = [
+  ['Health', /paracetamol|pain relief|allergy|hay fever|vitamin/],
+  ['Personal care', /shampoo|conditioner|shower gel|nivea|mitchum|deodorant|colgate|mou?n?th ?wash|radox|soap|hand ?wash|body butter|body wipes|kotex|oral hygiene/],
+  ['Household & cleaning', /bleach|washing up|laundry|stain|starch|easy iron|demostos|domestos/],
+  ['Fragrances', /candle|diffuser|febreze|neutradol|fragrance/],
+  ['Bags & accessories', /\bbag\b|tote|bucket|suede|leather|reversible|medium (white|brown)|large white/],
+  ['Home & décor', /vase|ceramic|console|cosy home|flower|cookware|procook|judge/],
+  ['Tea & coffee', /\btea\b|teabags|coffee|cap+[au]c+ino|mocha|nescafe|kenco|costa|tetley|twinings|twinnings|barr?[ia]s[mt]|maxwell|coffee mate/],
+  ['Snacks & biscuits', /biscuit|digestive|cracker|shortbread|oaties|custard cream|rich tea|malted|galaxy|chocolate|chewing gum/],
+  ['Rice & grains', /rice|basmati|couscous|quinoa|\boats?\b|oatso|porridge|spaghetti|pasta/],
+  ['Kids', /child|kids|baby|vest/]
+];
+
+function guessCategory(name) {
+  const text = String(name || '').toLowerCase();
+  const match = CATEGORY_RULES.find(([, pattern]) => pattern.test(text));
+  return match ? match[0] : 'Pantry';
+}
+
+function syncPriceList(options) {
+  const book = spreadsheet();
+  const source = priceListSheet(book);
+  if (!source) return notify('No price-list tab found. Name a tab with "price list" in it and give it a "Product" header.');
+  const values = source.getDataRange().getValues();
+  const cols = priceListColumns(values);
+  if (!cols) return notify('The price-list tab needs a header row with a "Product" column.');
+  const onlyRow = options && options.row ? options.row - 1 : null;
+  const products = ensureSheet(book, 'Products');
+  const now = new Date().toISOString();
+  let added = 0, updated = 0, skipped = 0;
+  return withLock(() => {
+    for (let r = cols.headerRow + 1; r < values.length; r++) {
+      if (onlyRow !== null && r !== onlyRow) continue;
+      const row = values[r];
+      const name = clean(row[cols.product]);
+      if (!name) { skipped++; continue; }
+      const serial = cols.serial >= 0 ? String(row[cols.serial]).trim() : '';
+      const id = serial ? `PL-${serial.padStart(3, '0')}` : `PL-${Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, name)).slice(0, 10)}`;
+      const price = cols.price >= 0 ? toNaira(row[cols.price]) : 0;
+      const cost = cols.cost >= 0 ? toNaira(row[cols.cost]) : 0;
+      const quantity = cols.quantity >= 0 ? toNaira(row[cols.quantity]) : 0;
+      const existingRow = findRow(products, id);
+      if (!existingRow) {
+        writeRecord(products, {
+          'Product ID': id, 'Name': name, 'Category': guessCategory(name), 'Price (₦)': price, 'Sale price (₦)': 0, 'On sale': false,
+          'Cost price (₦)': cost || '', 'Stock': quantity, 'Available': price > 0 && quantity > 0, 'Image URL': '', 'Updated at': now
+        });
+        added++;
+        continue;
+      }
+      const current = readRow(products, existingRow);
+      const change = { 'Product ID': id, 'Name': name };
+      if (price) change['Price (₦)'] = price;
+      if (cost) change['Cost price (₦)'] = cost;
+      if (quantity && !Number(current.Stock)) {
+        change.Stock = quantity;
+        if (String(current.Available).toLowerCase() === 'false' && (price || Number(current['Price (₦)']))) change.Available = true;
+      }
+      const changed = Object.keys(change).some(key => String(change[key]) !== String(current[key]));
+      if (changed) { change['Updated at'] = now; writeRecord(products, change); updated++; }
+    }
+    const message = `Price list synced: ${added} added, ${updated} updated.` + (added ? ' New items are hidden from customers until they have a price and a quantity.' : '');
+    return onlyRow === null ? notify(message) : message;
+  });
+}
+
+// Simple trigger: keeps Products in step as you edit the price list.
+function onEdit(event) {
+  try {
+    const sheet = event && event.range && event.range.getSheet();
+    if (!sheet || !/price\s*list/i.test(sheet.getName())) return;
+    const first = event.range.getRow(), last = event.range.getLastRow();
+    if (last - first > 20) { syncPriceList(); return; }
+    for (let row = first; row <= last; row++) syncPriceList({ row });
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 /* ---------- Web app: reads ---------- */
