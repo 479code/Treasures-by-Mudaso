@@ -54,4 +54,4 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          command: pages deploy release --project-name=treasures-by-mudaso
+          command: pages deploy release --project-name=treasures-by-mudaso --branch=main --commit-dirty=true
